@@ -216,19 +216,32 @@ printInfoColorpaletteFancy()
 
 ##------------------------------------------------------------------------------
 ##
+getCPUTempLine()
+{
+	local sensor_output
+	sensor_output=$(sensors 2>/dev/null) || return 1
+	## sensors also lists NIC and chipset readings; only accept known CPU labels.
+	grep -E '^[[:space:]]*(Package id [0-9]+|Tdie|Tctl|Core 0):.*°[CF]' <<< "$sensor_output" | head -n 1 || true
+}
+
+
+##------------------------------------------------------------------------------
+##
 printInfoCPUTemp()
 {
-	if ( which sensors > /dev/null 2>&1 && sensors > /dev/null 2>&1); then
+	if command -v sensors > /dev/null 2>&1; then
 
 		## GET VALUES
-		local temp_line=$(sensors 2>/dev/null |\
-		                  grep -E '°[CF]' |\
-		                  head -n 1)
+		local temp_line
+		if ! temp_line=$(getCPUTempLine); then
+			printInfoLine "CPU temp" "lm-sensors not installed"
+			return
+		fi
 		local units=$(sed -nE 's/.*°([CF]).*/°\1/p' <<< "$temp_line")
 		local current=$(sed -nE 's/^[^+]*\+([0-9]+([.][0-9]+)?)°[CF].*/\1/p' <<< "$temp_line")
 		local high=$(sed -nE 's/.*high = \+([0-9]+([.][0-9]+)?)°[CF].*/\1/p' <<< "$temp_line")
 		local max=$(sed -nE 's/.*crit = \+([0-9]+([.][0-9]+)?)°[CF].*/\1/p' <<< "$temp_line")
-		if [ -z "$current" ] || [ -z "$high" ] || [ -z "$max" ]; then
+		if [ -z "$current" ]; then
 			printInfoLine "CPU temp" "unavailable"
 			return
 		fi
@@ -236,12 +249,14 @@ printInfoCPUTemp()
 
 		## DETERMINE STATE
 		## Use bc because we might be dealing with decimals
-		if   (( $(echo "$current < $high" | bc -l) )); then
-			local state="nominal"
-		elif (( $(echo "$current < $max" | bc -l) )); then
-			local state="critical";
-		else
-			local state="error";
+		## Without both limits, show the reading but do not claim a temperature state.
+		local state="nominal"
+		if [ -n "$high" ] && [ -n "$max" ] && (( $(echo "$current < $high" | bc -l) )); then
+			state="nominal"
+		elif [ -n "$high" ] && [ -n "$max" ] && (( $(echo "$current < $max" | bc -l) )); then
+			state="critical"
+		elif [ -n "$high" ] && [ -n "$max" ]; then
+			state="error"
 		fi
 
 
@@ -424,12 +439,14 @@ printMonitorHome()
 ##
 printMonitorCPUTemp()
 {
-	if ( which sensors > /dev/null 2>&1 ); then
+	if command -v sensors > /dev/null 2>&1; then
 
 		## GET VALUES
-		local temp_line=$(sensors |\
-		                  grep -E '°[CF]' |\
-		                  head -n 1)
+		local temp_line
+		if ! temp_line=$(getCPUTempLine); then
+			printInfoLine "CPU temp" "unavailable"
+			return
+		fi
 		local units=$(sed -nE 's/.*°([CF]).*/°\1/p' <<< "$temp_line")
 		local current=$(sed -nE 's/^[^+]*\+([0-9]+([.][0-9]+)?)°[CF].*/\1/p' <<< "$temp_line")
 		local high=$(sed -nE 's/.*high = \+([0-9]+([.][0-9]+)?)°[CF].*/\1/p' <<< "$temp_line")
